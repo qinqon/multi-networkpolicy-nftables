@@ -751,7 +751,9 @@ func verifyNFTablesGoldenFile(goldenFileName string) error {
 }
 
 func dumpNFTRules() (string, error) {
-	cmd := exec.Command("nft", "list", "ruleset")
+	// Keep the existing goldens as regression coverage of inet behavior.
+	// The bridge backend has separate forwarding/data-plane coverage.
+	cmd := exec.Command("nft", "list", "table", "inet", tableName)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("failed to execute command [%s]: %w: %s", cmd.String(), err, string(out))

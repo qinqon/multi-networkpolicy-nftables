@@ -13,12 +13,16 @@ import (
 
 // cleanUpPolicy cleans up the policy
 func cleanUpPolicy(ctx context.Context, policyName string, policyNamespace string, logger logr.Logger) error {
-	nft, err := knftables.New(knftables.InetFamily, tableName)
-	if err != nil {
-		return fmt.Errorf("failed to create nftables client: %w", err)
+	for _, family := range []knftables.Family{knftables.InetFamily, knftables.BridgeFamily} {
+		nft, err := knftables.New(family, tableName)
+		if err != nil {
+			return fmt.Errorf("failed to create %s nftables client: %w", family, err)
+		}
+		if err := cleanUp(ctx, nft, policyName, policyNamespace, logger); err != nil {
+			return err
+		}
 	}
-
-	return cleanUp(ctx, nft, policyName, policyNamespace, logger)
+	return nil
 }
 
 // cleanUp cleans up the policy chains, rules and sets
@@ -29,63 +33,17 @@ func cleanUp(ctx context.Context, nft knftables.Interface, policyName string, po
 
 	policyRuleComment := fmt.Sprintf("%s/%s", policyNamespace, policyName)
 
-	// Delete rule in input chain
-	rules, err := nft.ListRules(ctx, inputChain)
-	if err != nil {
-		if !knftables.IsNotFound(err) {
-			return fmt.Errorf("failed to list rules in input chain: %w", err)
+	// A policy may have dispatchers in either family. Missing chains are normal.
+	for _, chain := range []string{inputChain, outputChain, forwardIngressChain, forwardEgressChain, ingressChain, egressChain} {
+		rules, err := nft.ListRules(ctx, chain)
+		if err != nil && !knftables.IsNotFound(err) {
+			return fmt.Errorf("failed to list rules in %s chain: %w", chain, err)
 		}
-	}
-
-	for _, rule := range rules {
-		if rule.Comment != nil && *rule.Comment == policyRuleComment {
-			logger.V(1).Info("Deleting rule in input chain", "rule", rule.Comment)
-			tx.Delete(rule)
-		}
-	}
-
-	// Delete rule in output chain
-	rules, err = nft.ListRules(ctx, outputChain)
-	if err != nil {
-		if !knftables.IsNotFound(err) {
-			return fmt.Errorf("failed to list rules in output chain: %w", err)
-		}
-	}
-
-	for _, rule := range rules {
-		if rule.Comment != nil && *rule.Comment == policyRuleComment {
-			logger.V(1).Info("Deleting rule in output chain", "rule", rule.Comment)
-			tx.Delete(rule)
-		}
-	}
-
-	// Delete rule in ingress chain
-	rules, err = nft.ListRules(ctx, ingressChain)
-	if err != nil {
-		if !knftables.IsNotFound(err) {
-			return fmt.Errorf("failed to list rules in ingress chain: %w", err)
-		}
-	}
-
-	for _, rule := range rules {
-		if rule.Comment != nil && *rule.Comment == policyRuleComment {
-			logger.V(1).Info("Deleting rule in ingress chain", "rule", rule.Comment)
-			tx.Delete(rule)
-		}
-	}
-
-	// Delete rule in egress chain
-	rules, err = nft.ListRules(ctx, egressChain)
-	if err != nil {
-		if !knftables.IsNotFound(err) {
-			return fmt.Errorf("failed to list rules in egress chain: %w", err)
-		}
-	}
-
-	for _, rule := range rules {
-		if rule.Comment != nil && *rule.Comment == policyRuleComment {
-			logger.V(1).Info("Deleting rule in egress chain", "rule", rule.Comment)
-			tx.Delete(rule)
+		for _, rule := range rules {
+			if rule.Comment != nil && *rule.Comment == policyRuleComment {
+				logger.V(1).Info("Deleting policy dispatcher", "chain", chain, "rule", rule.Comment)
+				tx.Delete(rule)
+			}
 		}
 	}
 
@@ -100,7 +58,8 @@ func cleanUp(ctx context.Context, nft knftables.Interface, policyName string, po
 	}
 
 	for _, chain := range chains {
-		if chain == fmt.Sprintf("%s%s", prefixNetworkPolicyChain, hashName) {
+		base := fmt.Sprintf("%s%s", prefixNetworkPolicyChain, hashName)
+		if chain == base || chain == base+"-"+ingressChain || chain == base+"-"+egressChain {
 			logger.V(1).Info("Deleting policy chain", "chain", chain)
 			tx.Flush(&knftables.Chain{
 				Name: chain,

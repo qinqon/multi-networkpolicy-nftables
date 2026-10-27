@@ -20,6 +20,13 @@ import (
 
 // enforcePolicy applies the NFTables policy for a pod
 func (n *NFTables) enforcePolicy(ctx context.Context, pod *corev1.Pod, interfaces []Interface, policy *datastore.Policy, logger logr.Logger) error {
+	if err := n.enforceInetPolicy(ctx, pod, interfaces, policy, logger); err != nil {
+		return err
+	}
+	return n.enforceBridgePolicy(ctx, pod, interfaces, policy, logger)
+}
+
+func (n *NFTables) enforceInetPolicy(ctx context.Context, pod *corev1.Pod, interfaces []Interface, policy *datastore.Policy, logger logr.Logger) error {
 	logger.Info("Applying policy")
 
 	nft, err := knftables.New(knftables.InetFamily, tableName)
@@ -388,12 +395,15 @@ func createPolicyChain(ctx context.Context, nft knftables.Interface, tx *knftabl
 
 // createIngressRules creates the ingress rules for a policy
 func (n *NFTables) createIngressRules(ctx context.Context, tx *knftables.Transaction, matchedInterfaces []Interface, policy *datastore.Policy, hashName string, logger logr.Logger) error {
-	logger.Info("Creating ingress rules")
-
 	npChainName := fmt.Sprintf("%s%s", prefixNetworkPolicyChain, hashName)
 
 	// Reverse rules for IPv4 and IPv6 - hairpinning
 	createReverseRules(tx, matchedInterfaces, npChainName, logger)
+	return n.createIngressRulesForChain(ctx, tx, matchedInterfaces, policy, hashName, npChainName, logger)
+}
+
+func (n *NFTables) createIngressRulesForChain(ctx context.Context, tx *knftables.Transaction, matchedInterfaces []Interface, policy *datastore.Policy, hashName, npChainName string, logger logr.Logger) error {
+	logger.Info("Creating ingress rules")
 
 	if len(policy.Spec.Ingress) == 0 {
 		logger.Info("No ingress rules specified, no rules will be created")
@@ -515,9 +525,12 @@ func (n *NFTables) createIngressRules(ctx context.Context, tx *knftables.Transac
 
 // createEgressRules creates the egress rules for a policy
 func (n *NFTables) createEgressRules(ctx context.Context, tx *knftables.Transaction, matchedInterfaces []Interface, policy *datastore.Policy, hashName string, logger logr.Logger) error {
-	logger.Info("Creating egress rules")
-
 	npChainName := fmt.Sprintf("%s%s", prefixNetworkPolicyChain, hashName)
+	return n.createEgressRulesForChain(ctx, tx, matchedInterfaces, policy, hashName, npChainName, logger)
+}
+
+func (n *NFTables) createEgressRulesForChain(ctx context.Context, tx *knftables.Transaction, matchedInterfaces []Interface, policy *datastore.Policy, hashName, npChainName string, logger logr.Logger) error {
+	logger.Info("Creating egress rules")
 
 	if len(policy.Spec.Egress) == 0 {
 		logger.Info("No egress rules specified, no rules will be created")

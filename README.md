@@ -149,6 +149,8 @@ The controller supports the following command-line flags for customization:
 
 For a more detailed technical design, please see the [NFTables Design Document](./docs/nftables.md).
 
+This branch also includes a [bridge-forwarding proof of concept](./docs/bridge-forwarding.md).
+
 ## License
 
 This project is licensed under the Apache License 2.0. See the LICENSE file for details.
